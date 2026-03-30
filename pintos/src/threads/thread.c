@@ -62,6 +62,59 @@ bool thread_mlfqs;
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
+
+/* Returns true if thread A has strictly higher priority than thread B.
+   Uses the elem field (for ready_list and semaphore waiter lists). */
+bool
+thread_priority_greater (const struct list_elem *a,
+                         const struct list_elem *b,
+                         void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->priority
+       > list_entry (b, struct thread, elem)->priority;
+}
+
+/* Same comparison but via donate_elem (for donations lists). */
+static bool
+thread_priority_greater_donate (const struct list_elem *a,
+                                const struct list_elem *b,
+                                void *aux UNUSED)
+{
+  return list_entry (a, struct thread, donate_elem)->priority
+       > list_entry (b, struct thread, donate_elem)->priority;
+}
+
+/* Yields the CPU if a higher-priority thread is ready. */
+void
+thread_yield_if_not_highest (void)
+{
+  if (!list_empty (&ready_list))
+    {
+      struct thread *front = list_entry (list_front (&ready_list),
+                                         struct thread, elem);
+      if (front->priority > thread_current ()->priority)
+        thread_yield ();
+    }
+}
+
+/* Recalculates thread T's effective priority as
+   max(base_priority, highest donor priority). */
+void
+thread_refresh_priority (struct thread *t)
+{
+  int eff = t->base_priority;
+
+  if (!list_empty (&t->donations))
+    {
+      list_sort (&t->donations, thread_priority_greater_donate, NULL);
+      int donor_max = list_entry (list_front (&t->donations),
+                                  struct thread, donate_elem)->priority;
+      if (donor_max > eff)
+        eff = donor_max;
+    }
+
+  t->priority = eff;
+}
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
 static void init_thread (struct thread *, const char *name, int priority);
@@ -237,9 +290,14 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, thread_priority_greater, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+
+  /* Yield if the newly unblocked thread has higher priority. */
+  if (!intr_context () &&
+      t->priority > thread_current ()->priority)
+    thread_yield ();
 }
 
 /* Returns the name of the running thread. */
@@ -307,8 +365,8 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+    list_insert_ordered (&ready_list, &cur->elem, thread_priority_greater, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -333,9 +391,12 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority) 
+thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current ();
+  cur->base_priority = new_priority;
+  thread_refresh_priority (cur);
+  thread_yield_if_not_highest ();
 }
 
 /* Returns the current thread's priority. */
@@ -462,6 +523,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->base_priority = priority;
+  t->waiting_on_lock = NULL;
+  list_init (&t->donations);
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
