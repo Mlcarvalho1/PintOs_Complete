@@ -66,6 +66,9 @@ start_process (void *file_name_)
   if (!success) 
     thread_exit ();
 
+  // argument_stack(parse, count, &if_.esp); // Implementar funcao para primeira entrega
+  // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true); // Faz dump do hex map do intr_frame
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -437,7 +440,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        *esp = PHYS_BASE - 12; // Mudanca sugerida da documentacao
       else
         palloc_free_page (kpage);
     }
