@@ -51,9 +51,9 @@ static void
 start_process (void *file_name_)
 {
   char *entry = file_name_;
-  char *save_ptr;
+  char *args;
 
-  char *file_name = strtok_r(entry, " ", &save_ptr); // Pega a primeira palavra da entrada (que eh filename)
+  char *file_name = strtok_r(entry, " ", &args); // Pega a primeira palavra da entrada (que eh filename)
   struct intr_frame if_;
   bool success;
 
