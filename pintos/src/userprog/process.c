@@ -45,6 +45,18 @@ process_execute (const char *file_name)
   return tid;
 }
 
+void argument_stack (char **args, void **esp) {
+  // copiar string args (primeiro strtok vai alterar a string)
+  // pegar count de argumentos
+  // alocar array de strings
+  // strtok para cada token e colocar tokens no array
+  // dar push na pilha do ultimo ao primeiro
+  // dar push no padding
+  // dar push nos enderecos dos args
+  // dar push no count (argc)
+  // dar push 0
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void
@@ -69,7 +81,7 @@ start_process (void *file_name_)
   if (!success) 
     thread_exit ();
 
-  // argument_stack(parse, count, &if_.esp); // Implementar funcao para primeira entrega
+  argument_stack(&args, &if_.esp); // Implementar funcao para primeira entrega
   // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true); // Faz dump do hex map do intr_frame
 
   /* Start the user process by simulating a return from an
