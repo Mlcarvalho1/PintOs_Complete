@@ -46,11 +46,35 @@ process_execute (const char *file_name)
 }
 
 void argument_stack (char **args, void **esp) {
-  // copiar string args (primeiro strtok vai alterar a string)
-  // pegar count de argumentos
-  // alocar array de strings
-  // strtok para cada token e colocar tokens no array
+  // declarar array de ponteiros para char
+  char *arr[1];
+  char *save_ptr;
+  
+  int argc = 0; // contador de argumentos
+  
+  char token = strtok_r(*args, " ", &save_ptr) // pegar primeiro token
+
+  // pegar count e strings dos argumentos
+  while(token != NULL){
+    arr[argc] = token;
+    char **aux = realloc(arr, (argc + 2) * sizeof(char *)); // realoca memoria de maneira segura
+    if (aux == NULL) {
+        fprintf(stderr, "Erro ao realocar memória\n");
+        free(arr); 
+        arr = NULL;
+    } else {
+        // Sucesso: ptr_original agora aponta para a nova área (ou a mesma movida)
+        arr = aux;
+    }
+    argc++;
+    // alocar memoria para token (apenas adicionar um ponteiro)
+    strtok_r(NULL, " ", &save_ptr);
+  }
+
   // dar push na pilha do ultimo ao primeiro
+  for(int i = (argc - 1); i >= 0; i--) {
+    // stack_push(*arr[i])
+  }
   // dar push no padding
   // dar push nos enderecos dos args
   // dar push no count (argc)
