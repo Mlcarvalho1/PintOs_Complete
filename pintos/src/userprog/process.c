@@ -26,7 +26,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
@@ -38,47 +38,74 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  /* Usa apenas o nome do executavel (sem argumentos) como nome da thread. */
+  char name_buf[NAME_MAX + 2];
+  char *save_ptr;
+  strlcpy (name_buf, file_name, sizeof name_buf);
+  char *exec_name = strtok_r (name_buf, " ", &save_ptr);
+
+  tid = thread_create (exec_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
   return tid;
 }
 
-void argument_stack (char **args, void **esp) {
-  // declarar array de ponteiros para char
-  char *arr[1];
-  char *save_ptr;
-  
-  int argc = 0; // contador de argumentos
-  
-  char token = strtok_r(*args, " ", &save_ptr) // pegar primeiro token
+#define ARGS_MAX 128
 
-  // pegar count e strings dos argumentos
-  while(token != NULL){
-    arr[argc] = token;
-    char **aux = realloc(arr, (argc + 2) * sizeof(char *)); // realoca memoria de maneira segura
-    if (aux == NULL) {
-        fprintf(stderr, "Erro ao realocar memória\n");
-        free(arr); 
-        arr = NULL;
-    } else {
-        // Sucesso: ptr_original agora aponta para a nova área (ou a mesma movida)
-        arr = aux;
+static void
+argument_stack (const char *args, void **esp)
+{
+  char *argv[ARGS_MAX];
+  int argc = 0;
+
+  /* Copia args para buffer local pois strtok_r modifica a string. */
+  char buf[PGSIZE];
+  strlcpy (buf, args != NULL ? args : "", sizeof buf);
+
+  /* Fase 1: empurra cada string de argumento na pilha. */
+  char *token, *save_ptr;
+  for (token = strtok_r (buf, " ", &save_ptr);
+       token != NULL && argc < ARGS_MAX;
+       token = strtok_r (NULL, " ", &save_ptr))
+    {
+      size_t len = strlen (token) + 1;
+      *esp -= len;
+      memcpy (*esp, token, len);
+      argv[argc++] = *esp;
     }
-    argc++;
-    // alocar memoria para token (apenas adicionar um ponteiro)
-    strtok_r(NULL, " ", &save_ptr);
-  }
 
-  // dar push na pilha do ultimo ao primeiro
-  for(int i = (argc - 1); i >= 0; i--) {
-    // stack_push(*arr[i])
-  }
-  // dar push no padding
-  // dar push nos enderecos dos args
-  // dar push no count (argc)
-  // dar push 0
+  /* Fase 2: alinha esp para multiplo de 4 bytes. */
+  uintptr_t addr = (uintptr_t) *esp;
+  uintptr_t aligned = addr & ~(uintptr_t) 3;
+  if (aligned < addr)
+    {
+      memset ((void *) aligned, 0, addr - aligned);
+      *esp = (void *) aligned;
+    }
+
+  /* Fase 3: sentinel argv[argc] = NULL. */
+  *esp -= sizeof (char *);
+  *(char **) *esp = NULL;
+
+  /* Fase 4: ponteiros argv[i], do ultimo ao primeiro. */
+  for (int i = argc - 1; i >= 0; i--)
+    {
+      *esp -= sizeof (char *);
+      *(char **) *esp = argv[i];
+    }
+
+  /* Fase 5: argv (ponteiro para argv[0]). */
+  char **argv_ptr = (char **) *esp;
+  *esp -= sizeof (char **);
+  *(char ***) *esp = argv_ptr;
+
+  /* Fase 6: argc. */
+  *esp -= sizeof (int);
+  *(int *) *esp = argc;
+
+  /* Fase 7: endereco de retorno falso. */
+  *esp -= sizeof (void *);
+  *(void **) *esp = NULL;
 }
 
 /* A thread function that loads a user process and starts it
@@ -89,7 +116,9 @@ start_process (void *file_name_)
   char *entry = file_name_;
   char *args;
 
-  char *file_name = strtok_r(entry, " ", &args); // Pega a primeira palavra da entrada (que eh filename)
+  /* Separa "prog arg1 arg2" -> file_name = "prog", args -> "arg1 arg2". */
+  char *file_name = strtok_r (entry, " ", &args);
+
   struct intr_frame if_;
   bool success;
 
@@ -100,13 +129,18 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success)
+    {
+      palloc_free_page (entry);
+      thread_exit ();
+    }
 
-  argument_stack(&args, &if_.esp); // Implementar funcao para primeira entrega
-  // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true); // Faz dump do hex map do intr_frame
+  /* Monta a pilha de argumentos ANTES de liberar a pagina
+     (args aponta para dentro dela). */
+  argument_stack (args, &if_.esp);
+  /* hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, true); */
+
+  palloc_free_page (entry);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -479,7 +513,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12; // Mudanca sugerida da documentacao
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
